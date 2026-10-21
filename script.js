@@ -554,10 +554,22 @@ function computeAccountBalances() {
       if (from === 'main') {
         var fromAcc = t.fromAccount || t.account;
         if (fromAcc && acc[fromAcc] !== undefined) acc[fromAcc] -= amt;
+        
+        // FIX: Kalau setor dari main ke tabungan/DD, tambahkan ke saldo akun tujuan (misal Dompet Simpanan)
+        if (to !== 'main' && to !== 'snack_cash' && to !== 'snack_noncash') {
+          var toAcc = t.toAccount || t.fromAccount; 
+          if (toAcc && acc[toAcc] !== undefined) acc[toAcc] += amt;
+        }
       }
       if (to === 'main') {
         var toAcc = t.toAccount || t.account;
         if (toAcc && acc[toAcc] !== undefined) acc[toAcc] += amt;
+
+        // FIX: Kalau tarik dari tabungan/DD ke main, kurangi saldo akun asal
+        if (from !== 'main' && from !== 'snack_cash' && from !== 'snack_noncash') {
+          var fromAccWithdraw = t.fromAccount || t.toAccount;
+          if (fromAccWithdraw && acc[fromAccWithdraw] !== undefined) acc[fromAccWithdraw] -= amt;
+        }
       }
     }
   });
@@ -3242,10 +3254,13 @@ function openTransferForm(opts) {
     '</div>' +
     '<div class="field"><label>Nominal (Rp)</label>' +
       '<input type="number" id="f_amount" min="1" step="1" inputmode="numeric" value="' + (opts.amount || '') + '" /></div>' +
-    (isWithdraw ? '' : '<div class="field"><label>Sumber akun</label>' +
-      '<select id="f_fromAccount">' + accountOptions('cash') + '</select></div>') +
-    (isWithdraw ? '<div class="field"><label>Tujuan akun</label>' +
-      '<select id="f_toAccount">' + accountOptions('cash') + '</select></div>' : '') +
+    
+    // FIX: Selalu tampilkan Sumber Akun dan Tujuan Akun
+    '<div class="field"><label>' + (isWithdraw ? 'Ambil dari Akun (Asal)' : 'Sumber Akun (Ambil dari)') + '</label>' +
+      '<select id="f_fromAccount">' + accountOptions('cash') + '</select></div>' +
+    '<div class="field"><label>' + (isWithdraw ? 'Terima ke Akun (Tujuan)' : 'Tujuan Akun (Simpan ke)') + '</label>' +
+      '<select id="f_toAccount">' + accountOptions('bni') + '</select></div>' +
+
     '<div class="field"><label>Catatan</label><input type="text" id="f_note" /></div>' +
     '<div class="help">Transfer internal tidak dihitung sebagai pemasukan/pengeluaran konsumsi.</div>';
 
@@ -3279,8 +3294,10 @@ function openTransferForm(opts) {
         method: 'noncash', note: note,
         createdAt: nowStamp()
       };
-      if (!isWithdraw) tx.fromAccount = $('#f_fromAccount', root).value;
-      if (isWithdraw) tx.toAccount = $('#f_toAccount', root).value;
+      
+      // FIX: Tangkap kedua akun
+      tx.fromAccount = $('#f_fromAccount', root).value;
+      tx.toAccount = $('#f_toAccount', root).value;
 
       state.transactions.push(tx);
       saveState();

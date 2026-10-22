@@ -281,7 +281,7 @@ function defaultState() {
     version: STATE_VERSION,
     createdAt: nowStamp(),
     transactions: [],
-    accounts: DEFAULT_ACCOUNTS.slice(),
+    accounts: JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS)),
     predictions: [],
     titipan: [],
     debts: [],
@@ -331,6 +331,7 @@ function storageAvailable() {
 }
 
 function saveState() {
+  _txRev++;
   if (!storageOK) return false;
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -387,7 +388,8 @@ if (!state.initialAccounts || typeof state.initialAccounts !== 'object') {
 /* ─────────────────────────────────────────── */
   } catch (e) {
     console.error('Gagal memuat data:', e);
-    toast('Data tersimpan rusak. Memulai fresh.', 'err');
+    try { if (raw) window.localStorage.setItem(STORAGE_KEY + '_corrupt_' + Date.now(), raw); } catch (e2) {}
+    toast('Data tersimpan rusak. Salinan cadangan disimpan, memulai baru.', 'err');
     state = defaultState();
   }
 }
@@ -395,6 +397,7 @@ if (!state.initialAccounts || typeof state.initialAccounts !== 'object') {
 function mergeState(base, incoming) {
   var out = base;
   Object.keys(incoming || {}).forEach(function (k) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') return;
     var v = incoming[k];
     if (v && typeof v === 'object' && !Array.isArray(v) &&
         base[k] && typeof base[k] === 'object' && !Array.isArray(base[k])) {
@@ -417,7 +420,14 @@ function sortTx(a, b) {
   if (ka > kb) return 1;
   return 0;
 }
-function allTx() { return state.transactions.slice().sort(sortTx); }
+var _txCache = null, _txRev = 0;
+function allTx() {
+  var n = state.transactions.length;
+  if (!_txCache || _txCache.rev !== _txRev || _txCache.n !== n || _txCache.ref !== state.transactions) {
+    _txCache = { rev: _txRev, n: n, ref: state.transactions, list: state.transactions.slice().sort(sortTx) };
+  }
+  return _txCache.list.slice();
+}
 
 /**
  * HITUNG SEMUA SALDO DARI SATU SUMBER.
@@ -508,6 +518,8 @@ function computeBalances() {
   }
 
   // Clamp negatif
+  if (b.snackCash < 0) { b.snackNonCash += b.snackCash; b.snackCash = 0; }
+  else if (b.snackNonCash < 0) { b.snackCash += b.snackNonCash; b.snackNonCash = 0; }
   if (b.snackCash < 0) b.snackCash = 0;
   if (b.snackNonCash < 0) b.snackNonCash = 0;
   if (b.goldGrams < 0) b.goldGrams = 0;
@@ -533,6 +545,12 @@ function computeAccountBalances() {
   allTx().forEach(function (t) {
     var amt = Number(t.amount) || 0;
     var a = accountOf(t);
+    if (t.type === 'goldBuy' || t.type === 'goldSell') {
+      var ga = (t.account && acc[t.account] !== undefined) ? t.account : 'cash';
+      if (acc[ga] === undefined) acc[ga] = 0;
+      acc[ga] += (t.type === 'goldBuy') ? -(amt + (Number(t.fee) || 0)) : (amt - (Number(t.fee) || 0));
+      return;
+    }
 
     if (t.type === 'income') {
       if (acc[a] === undefined) acc[a] = 0;
@@ -790,19 +808,19 @@ function txRow(t) {
   var icon, amtCls, amtSign, title, meta;
 
   if (t.type === 'income') {
-    icon = CAT_ICON[t.category] || '💵';
+    icon = CAT_ICON[(t.category || 'Lainnya')] || '💵';
     amtCls = 'val-emerald'; amtSign = '+';
-    title = t.source ? (t.source + ' • ' + t.category) : t.category;
+    title = t.source ? (t.source + ' • ' + (t.category || 'Lainnya')) : (t.category || 'Lainnya');
     var accIdI = t.account || (t.method === 'cash' ? 'cash' : 'dana');
     meta = fmtTanggalPendek(t.date) + ' ' + (t.time || '') + ' • ' +
            getAccountIcon(accIdI) + ' ' + getAccountName(accIdI);
 
   } else if (t.type === 'expense') {
-    icon = CAT_ICON[t.category] || '💸';
+    icon = CAT_ICON[(t.category || 'Lainnya')] || '💸';
     amtCls = 'val-coral'; amtSign = '−';
-    title = t.description || t.category;
+    title = t.description || (t.category || 'Lainnya');
     var accId = t.account || (t.method === 'cash' ? 'cash' : 'dana');
-    meta = t.category + ' • ' + fmtTanggalPendek(t.date) + ' ' + (t.time || '') + ' • ' +
+    meta = (t.category || 'Lainnya') + ' • ' + fmtTanggalPendek(t.date) + ' ' + (t.time || '') + ' • ' +
            getAccountIcon(accId) + ' ' + getAccountName(accId);
     if (t.useSnack) meta += ' • 🍜 uang jajan';
 
@@ -836,7 +854,7 @@ function txRow(t) {
     title = t.type; meta = t.date;
   }
 
-  var canEdit = (t.type === 'income' || t.type === 'expense' ||
+  var canEdit = !t.debtId && (t.type === 'income' || t.type === 'expense' ||
                  t.type === 'goldBuy' || t.type === 'goldSell');
 
   return '<div class="tx">' +
@@ -857,7 +875,7 @@ function txRow(t) {
    BAGIAN 8 — DASHBOARD
    ============================================================ */
 
-function pageDashboard(b) {
+function pageDashboardBase(b) {
   var today = todayISO();
   var budget = dailyBudgetFor(today);
   var spentToday = sumExpenseOn(today);
@@ -1922,7 +1940,7 @@ function pageDebts(b) {
    BAGIAN 17 — AI ADVISOR
    ============================================================ */
 
-function pageAI(b) {
+function pageAIClassic(b) {
   var a = analyze(b);
 
   var html = '<div class="card">' +
@@ -3206,7 +3224,7 @@ function openExpenseForm(existing, preset) {
         category: category, description: desc,
         amount: amount, account: account, method: method,
         note: note, useSnack: useSnack, breakdown: {},
-        predictionId: t.predictionId || null,
+        predictionId: t.predictionId || null, debtId: t.debtId || null,
         createdAt: isEdit ? existing.createdAt : nowStamp()
       };
 
@@ -3853,7 +3871,7 @@ function openDebtPaymentForm(debt) {
       var tx = isOwed
         ? {
             id: uid(), type: 'expense', date: date, time: time,
-            category: 'Bayar Utang',
+            category: 'Bayar Utang', debtId: debt.id,
             description: 'Bayar utang ke ' + debt.person,
             amount: amount, account: account, method: account === 'cash' ? 'cash' : 'noncash',
             note: note, useSnack: false, breakdown: {},
@@ -3861,7 +3879,7 @@ function openDebtPaymentForm(debt) {
           }
         : {
             id: uid(), type: 'income', date: date, time: time,
-            category: 'Pinjaman Masuk',
+            category: 'Pinjaman Masuk', debtId: debt.id,
             source: debt.person,
             description: 'Terima bayaran dari ' + debt.person,
             amount: amount, account: account, method: 'cash',
@@ -4551,6 +4569,14 @@ case 'add-debt': openDebtForm(null); break;
             var pp = state.predictions.filter(function (x) { return x.id === txd.predictionId; })[0];
             if (pp) { pp.status = 'planned'; pp.txId = null; }
           }
+          if (txd.debtId) {
+            var dd = state.debts.filter(function (x) { return x.id === txd.debtId; })[0];
+            if (dd) {
+              dd.paid = Math.max(0, (Number(dd.paid) || 0) - (Number(txd.amount) || 0));
+              dd.status = dd.paid >= (Number(dd.amount) || 0) ? 'paid' : 'active';
+              if (dd.status === 'active') delete dd.paidDate;
+            }
+          }
           saveState(); renderPage(); mtPlay('del');
           toast('Dihapus.', 'ok');
         });
@@ -4792,8 +4818,7 @@ function mtPulse() {
   var p = document.getElementById('mtAudioPulse');
   if (!p) return;
   p.classList.remove('fire');
-  void p.offsetWidth;
-  p.classList.add('fire');
+  requestAnimationFrame(function () { requestAnimationFrame(function () { p.classList.add('fire'); }); });
 }
 function mtSfxVol() { return (mtAudioSettings().volume || 0.5) * 0.22; }
 
@@ -4818,7 +4843,7 @@ function mtTone(opts) {
     gain.gain.setValueAtTime(0, t);
     gain.gain.linearRampToValueAtTime(vol, t + 0.008);
     gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    osc.connect(gain); gain.connect(ctx.destination);
+    osc.connect(gain); gain.connect(mtSfxBus(ctx));
     osc.start(t); osc.stop(t + dur + 0.02);
   } catch (e) {}
 }
@@ -4842,7 +4867,7 @@ function mtChord(freqs, dur, type, gainVal) {
       gain.gain.setValueAtTime(0, st);
       gain.gain.linearRampToValueAtTime(v, st + 0.01);
       gain.gain.exponentialRampToValueAtTime(0.0001, st + dur);
-      osc.connect(gain); gain.connect(ctx.destination);
+      osc.connect(gain); gain.connect(mtSfxBus(ctx));
       osc.start(st); osc.stop(st + dur + 0.02);
     });
   } catch (e) {}
@@ -4871,7 +4896,17 @@ var MT_SOUND = {
 function mtPlay(name) {
   try {
     var fn = MT_SOUND[name];
-    if (fn) { fn(); mtPulse(); }
+    if (!fn) return;
+    clearTimeout(_mtLowT);
+    if (MT_LOW[name]) {
+      _mtLowT = setTimeout(function () {
+        if (Date.now() - _mtBootAt < 700) return;
+        fn(); mtPulse();
+        if ((name === 'tap' || name === 'nav') && navigator.vibrate) { try { navigator.vibrate(6); } catch (e) {} }
+      }, 0);
+      return;
+    }
+    fn(); mtPulse();
   } catch (e) {}
 }
 
@@ -4882,6 +4917,8 @@ function mtGlobalClickSound(e) {
   if (actEl) {
     var act = actEl.dataset.act || '';
     if (act === 'preview-sound') return;
+    if (act === 'add-income' || act === 'quick-snack-income') return mtPlay('income');
+    if (act === 'add-expense' || act === 'add-expense-snack') return mtPlay('expense');
     if (act.indexOf('add-') === 0 || act.indexOf('quick-') === 0) return mtPlay('open');
     if (act.indexOf('del-') === 0 || act === 'reset-all') return mtPlay('del');
     if (act === 'open-recon' || act === 'open-cash-breakdown' || act === 'manage-accounts') return mtPlay('open_modal');
@@ -4894,7 +4931,8 @@ function mtGlobalClickSound(e) {
     if (act === 'realize-pred') return mtPlay('success');
     return mtPlay('tap');
   }
-  if (e.target.closest('[data-nav]')) return mtPlay('nav');
+  var navT = e.target.closest('[data-nav]');
+  if (navT) return mtNavSound(navT.dataset.nav);
   if (e.target.closest('[data-cal]')) return mtPlay('tap');
   if (e.target.closest('.btn, .icon-btn, .mt-switch')) return mtPlay('tap');
 }
@@ -5008,7 +5046,8 @@ function mtInitParticles() {
   c.className = 'mt-particles';
   c.setAttribute('aria-hidden', 'true');
   var symbols = ['💰', '💵', '🪙', '💸', '💎'];
-  var count = window.innerWidth < 600 ? 6 : 10;
+  var count = mtLowEnd() ? 0 : (window.innerWidth < 600 ? 4 : 8);
+  if (!count) return;
   for (var i = 0; i < count; i++) {
     var s = document.createElement('span');
     s.textContent = symbols[i % symbols.length];
@@ -5032,6 +5071,7 @@ function enhanceAnimations() {
   content.classList.remove('mt-animating');
   void content.offsetWidth;
   content.classList.add('mt-animating');
+  mtCountUp(content);
 
   setTimeout(function () {
     content.classList.remove('mt-animating');
@@ -5059,6 +5099,7 @@ function mtInitRipple() {
 
 function mtInitLiquidGlass() {
   if (mtReducedMotion()) return;
+  if (!(window.matchMedia && window.matchMedia('(hover:hover) and (pointer:fine)').matches)) return;
   var sidebar = document.getElementById('sidebar');
   if (!sidebar) return;
   var tX = 50, tY = 50, cX = 50, cY = 50, raf = null, active = false;
@@ -5130,7 +5171,7 @@ function mtShowSplash() {
         '<div class="mt-orbit-coin c1">💵</div>' +
         '<div class="mt-orbit-coin c2">🪙</div>' +
         '<div class="mt-orbit-coin c3">💰</div>' +
-        '<div class="mt-splash-logo">💰</div>' +
+        '<div class="mt-splash-logo">' + MT_LOGO_SVG + '</div>' +
       '</div>' +
       '<div class="mt-splash-name">MoneyTrack</div>' +
       '<div class="mt-splash-sub">Keuangan Pelajar</div>' +
@@ -5144,7 +5185,291 @@ function mtShowSplash() {
   setTimeout(function () {
     splash.classList.add('mt-hide');
     setTimeout(function () { if (splash.parentNode) splash.parentNode.removeChild(splash); }, 850);
-  }, 2100);
+  }, 1700);
+}
+
+/* ============================================================
+   BAGIAN 42 — PREMIUM LAYER (v2.1)
+   Suara berlapis, boot chime, SW fix, safety net, mode hemat
+   ============================================================ */
+
+var MT_LOGO_SVG = '<svg class="logo-svg" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="mtg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#35D39A"/><stop offset="1" stop-color="#65D8F2"/></linearGradient></defs><rect width="64" height="64" rx="18" fill="url(#mtg2)"/><path d="M16 44V22l16 14 16-14v22" fill="none" stroke="#06241A" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="48" cy="17" r="5" fill="#FFE9A3"/></svg>';
+
+function mtLowEnd() {
+  try {
+    var mem = navigator.deviceMemory || 4, cores = navigator.hardwareConcurrency || 4;
+    return mem <= 3 || cores <= 4;
+  } catch (e) { return false; }
+}
+
+/* Bus audio: lowpass + compressor biar suara lembut & anti-pecah */
+var _mtBus = null;
+function mtSfxBus(ctx) {
+  if (_mtBus && _mtBus.ctx === ctx) return _mtBus.input;
+  var input = ctx.createGain(), lp = ctx.createBiquadFilter(), comp = ctx.createDynamicsCompressor();
+  lp.type = 'lowpass'; lp.frequency.value = 7000; lp.Q.value = 0.5;
+  comp.threshold.value = -18; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.15;
+  input.connect(lp); lp.connect(comp); comp.connect(ctx.destination);
+  _mtBus = { ctx: ctx, input: input };
+  return input;
+}
+
+function mtArp(freqs, step, dur, gain) {
+  freqs.forEach(function (f, i) {
+    setTimeout(function () {
+      mtTone({ type: 'sine', freqStart: f, dur: dur || 0.22, gain: gain || 1, force: true });
+    }, i * step);
+  });
+}
+
+var _mtNavFreq = 660, _mtLowT = 0, _mtBootAt = 0;
+var MT_LOW = { tap: 1, nav: 1, open: 1, close: 1, toggleOn: 1, toggleOff: 1,
+               open_modal: 1, close_modal: 1, income: 1, expense: 1 };
+
+MT_SOUND.boot    = function () { mtArp([523.25, 659.25, 783.99, 1046.5], 90, 0.35, 0.8); };
+MT_SOUND.income  = function () { mtArp([659.25, 880, 1174.66], 70, 0.2, 1); };
+MT_SOUND.expense = function () { mtArp([523.25, 392], 80, 0.2, 0.8); };
+MT_SOUND.nav     = function () { mtTone({ type: 'sine', freqStart: _mtNavFreq * 0.85, freqEnd: _mtNavFreq, dur: 0.12, gain: 0.9 }); };
+
+/* Tiap halaman punya nada beda (skala pentatonik) */
+function mtNavSound(pageId) {
+  var scale = [523.25, 587.33, 659.25, 783.99, 880, 1046.5], idx = 0;
+  for (var i = 0; i < PAGES.length; i++) { if (PAGES[i].id === pageId) { idx = i; break; } }
+  _mtNavFreq = scale[idx % scale.length];
+  mtPlay('nav');
+}
+
+/* Anti error global: satu toast ramah, tidak spam */
+var _mtErrAt = 0;
+function mtErrToast() {
+  var n = Date.now();
+  if (n - _mtErrAt < 6000) return;
+  _mtErrAt = n;
+  toast('Ada kendala kecil, coba ulangi aksinya.', 'warn');
+}
+
+function mtRegisterSW() {
+  if (!('serviceWorker' in navigator)) return;
+  var reg = function () { navigator.serviceWorker.register('sw.js').catch(function () {}); };
+  if (document.readyState === 'complete') reg();
+  else window.addEventListener('load', reg, { once: true });
+}
+
+function mtPremiumInit() {
+  if (mtLowEnd()) document.documentElement.classList.add('mt-lite');
+
+  /* Hemat baterai: animasi & audio berhenti saat tab/app di background */
+  document.addEventListener('visibilitychange', function () {
+    document.body.classList.toggle('mt-paused', document.hidden);
+    var ctx = mtAudioCtx;
+    if (!ctx) return;
+    try { if (document.hidden) ctx.suspend(); else ctx.resume(); } catch (e) {}
+  });
+
+  /* Browser melarang autoplay: chime pembuka diputar di sentuhan pertama */
+  document.addEventListener('pointerdown', function () {
+    if (Date.now() - mtPageLoadTime > 20000) return;
+    _mtBootAt = Date.now();
+    mtPlay('boot');
+  }, { once: true, passive: true });
+
+  window.addEventListener('error', function (e) { console.error(e.error || e.message); mtErrToast(); });
+  window.addEventListener('unhandledrejection', function (e) { console.error(e.reason); mtErrToast(); });
+
+  mtRegisterSW();
+  try {
+    var go = new URLSearchParams(location.search).get('go');
+    if (go && PAGES.some(function (p) { return p.id === go; })) navigate(go);
+  } catch (e) {}
+}
+
+
+/* ============================================================
+   BAGIAN 43 — MESIN ANALISIS v3 (on-device, tanpa server)
+   ============================================================ */
+function mtDaysBetween(a, b) { return Math.round((parseISO(b) - parseISO(a)) / 86400000); }
+function mtClamp(x) { return Math.max(0, Math.min(100, x)); }
+
+function mtBrain(b) {
+  var today = todayISO(), T = parseISO(today);
+  var dayAt = function (n) { return isoOf(new Date(T.getFullYear(), T.getMonth(), T.getDate() - n)); };
+  var d7 = dayAt(6), d28 = dayAt(27), d30 = dayAt(29), mk = monthKey(today);
+  var byDay = {}, cat7 = {}, catPrev = {}, incomes = [], inc30 = 0, saved30 = 0, dep28 = 0, monthSpent = 0;
+
+  allTx().forEach(function (t) {
+    var a = Number(t.amount) || 0;
+    if (t.type === 'expense') {
+      byDay[t.date] = (byDay[t.date] || 0) + a;
+      if (monthKey(t.date) === mk) monthSpent += a;
+      if (t.category !== 'Bayar Utang') {
+        var c = t.category || 'Lainnya';
+        if (t.date >= d7) cat7[c] = (cat7[c] || 0) + a;
+        else if (t.date >= d28) catPrev[c] = (catPrev[c] || 0) + a;
+      }
+    } else if (t.type === 'income') {
+      if (t.date >= d30 && t.category !== 'Pinjaman Masuk') inc30 += a;
+      if (t.isSnackAllowance || t.category === 'Uang Jajan') incomes.push({ d: t.date, a: a });
+    } else if (t.type === 'transfer' && t.from === 'main' && (t.to === 'emergency' || t.to === 'savings')) {
+      if (t.date >= d30) saved30 += a;
+      if (t.to === 'emergency' && t.date >= d28) dep28 += a;
+    } else if (t.type === 'goldBuy' && t.date >= d30) { saved30 += a; }
+  });
+
+  var series = [];
+  for (var i = 13; i >= 0; i--) { var iso = dayAt(i); series.push({ iso: iso, v: byDay[iso] || 0 }); }
+  var vals = series.map(function (x) { return x.v; });
+  var sum14 = vals.reduce(function (s, v) { return s + v; }, 0), max14 = Math.max.apply(null, vals);
+  var active = vals.filter(function (v) { return v > 0; }).length;
+  var burn = active >= 3 ? (sum14 - max14) / 13 : sum14 / 14;   /* buang 1 lonjakan supaya tidak bias */
+  var med = vals.slice().sort(function (x, y) { return x - y; })[7] || 0;
+
+  var wd = [0, 0, 0, 0, 0, 0, 0];
+  for (i = 0; i < 28; i++) { var di = dayAt(i); wd[parseISO(di).getDay()] += byDay[di] || 0; }
+  var topWd = 0; for (i = 1; i < 7; i++) if (wd[i] > wd[topWd]) topWd = i;
+
+  /* Siklus uang jajan: tebak kapan pemasukan berikutnya */
+  incomes.sort(function (x, y) { return x.d < y.d ? -1 : 1; });
+  var gaps = [];
+  for (i = 1; i < incomes.length; i++) gaps.push(mtDaysBetween(incomes[i - 1].d, incomes[i].d));
+  gaps = gaps.filter(function (g) { return g > 0; }).sort(function (x, y) { return x - y; });
+  var gap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 7, left = 7;
+  if (incomes.length) { left = mtDaysBetween(today, isoOf(new Date(parseISO(incomes[incomes.length - 1].d).getTime() + gap * 86400000))); if (left < 1) left = 1; if (left > 31) left = 31; }
+  var horizon = isoOf(new Date(T.getFullYear(), T.getMonth(), T.getDate() + left));
+
+  var upcoming = 0, lateP = 0;
+  state.predictions.forEach(function (p) {
+    if (p.status !== 'planned') return;
+    if (p.date >= today && p.date <= horizon) upcoming += Number(p.amount) || 0;
+    if (p.date < today) lateP++;
+  });
+  var dueDebt = 0, overdue = 0;
+  state.debts.forEach(function (d) {
+    if (d.status !== 'active' || d.type !== 'owed') return;
+    var rest = Math.max(0, (Number(d.amount) || 0) - (Number(d.paid) || 0));
+    if (d.dueDate && d.dueDate <= horizon) dueDebt += rest;
+    if (d.dueDate && d.dueDate < today) overdue++;
+  });
+  var safeDaily = Math.max(0, Math.floor((b.main - upcoming - dueDebt) / left / 500) * 500);
+  if (dailyBudgetFor(today) > 0) safeDaily = Math.min(safeDaily, dailyBudgetFor(today));
+  var runway = burn > 0 ? Math.max(0, b.main) / burn : null;
+  var dim = new Date(T.getFullYear(), T.getMonth() + 1, 0).getDate();
+  var proj = monthSpent + burn * Math.max(0, dim - T.getDate());
+
+  var tgtE = Number(state.emergency.target) || 0, savedRate = inc30 > 0 ? saved30 / inc30 : 0;
+  var okDays = series.filter(function (x) { return x.v <= dailyBudgetFor(x.iso); }).length;
+  var comp = {
+    buffer: runway === null ? 80 : mtClamp(runway / 21 * 100),
+    discipline: mtClamp(okDays / 14 * 100),
+    saving: inc30 > 0 ? mtClamp(savedRate / 0.2 * 100) : (saved30 > 0 ? 70 : 30),
+    emergency: tgtE > 0 ? mtClamp(b.emergency / tgtE * 100) : 60,
+    debt: mtClamp(100 - overdue * 40)
+  };
+  var score = Math.round(comp.buffer * 0.30 + comp.discipline * 0.25 + comp.saving * 0.20 + comp.emergency * 0.15 + comp.debt * 0.10);
+  if (b.unidentified > 0) score -= 8;
+  if (b.main < 0) score = Math.min(score, 20);
+  score = Math.max(0, Math.min(100, score));
+  var level = score >= 80 ? 'Sangat Sehat' : score >= 60 ? 'Sehat' : score >= 40 ? 'Perlu Perhatian' : 'Kritis';
+
+  var anomalies = [];
+  series.filter(function (x) { return x.v >= 30000 && x.v > Math.max(med, 1) * 2.5; })
+    .sort(function (x, y) { return y.v - x.v; }).slice(0, 2).forEach(function (x) {
+      anomalies.push('Pengeluaran ' + fmtTanggalPendek(x.iso) + ' sebesar <b>' + rupiah(x.v) + '</b> (' + (x.v / Math.max(burn, 1)).toFixed(1) + '× rata-rata harianmu).');
+    });
+  Object.keys(cat7).sort(function (x, y) { return cat7[y] - cat7[x]; }).forEach(function (c) {
+    if (anomalies.length >= 4) return;
+    var pw = (catPrev[c] || 0) / 3;
+    if (cat7[c] >= 20000 && cat7[c] > pw * 1.5) {
+      anomalies.push(pw > 0 ? c + ' minggu ini <b>' + rupiah(cat7[c]) + '</b>, naik ' + Math.round((cat7[c] / pw - 1) * 100) + '% dari rata-rata mingguan.'
+                            : c + ' muncul sebagai pengeluaran baru minggu ini: <b>' + rupiah(cat7[c]) + '</b>.');
+    }
+  });
+
+  var acts = [];
+  var add = function (pr, icon, title, text, tone) { acts.push({ pr: pr, icon: icon, title: title, text: text, tone: tone }); };
+  if (b.main < 0) add(100, '🚨', 'Saldo minus', 'Total uang likuid negatif ' + rupiah(b.main) + '. Hentikan pengeluaran non-esensial dan cek transaksi yang salah catat.', 'crit');
+  if (b.unidentified > 0) add(90, '🧾', 'Selesaikan rekonsiliasi', 'Ada selisih ' + rupiah(b.unidentified) + ' yang belum teridentifikasi, analisis jadi kurang akurat.', 'warn');
+  if (overdue) add(85, '⏰', 'Utang lewat jatuh tempo', overdue + ' utang sudah lewat tempo. Bayar duluan sebelum menabung.', 'crit');
+  if (runway !== null && runway < 7 && b.main >= 0) add(80, '⛽', 'Uang hanya cukup ±' + Math.floor(runway) + ' hari', 'Dengan pola jajan sekarang (' + rupiah(burn) + '/hari). Turunkan ke maksimal ' + rupiah(safeDaily) + '/hari sampai pemasukan berikutnya.', 'crit');
+  if (spentToday() > dailyBudgetFor(today) && dailyBudgetFor(today) > 0) add(70, '📉', 'Anggaran hari ini terlampaui', 'Lebih ' + rupiah(spentToday() - dailyBudgetFor(today)) + '. Besok kompensasi dengan jajan lebih ringan.', 'warn');
+  if (anomalies.length) add(60, '⚡', 'Ada lonjakan pengeluaran', anomalies[0], 'warn');
+  if (lateP) add(55, '🔮', lateP + ' prediksi lewat tanggal', 'Catat sebagai pengeluaran atau batalkan supaya proyeksi tetap akurat.', 'info');
+  if (inc30 > 0 && savedRate < 0.2 && b.main - upcoming - dueDebt > 20000) {
+    var need = Math.max(0, Math.floor((inc30 * 0.2 - saved30) / 1000) * 1000);
+    if (need >= 1000) add(50, '💰', 'Sisihkan ' + rupiah(Math.min(need, Math.floor(safeDaily * left * 0.3 / 1000) * 1000 || need)), 'Target ideal 20% dari pemasukan 30 hari. Baru tersisih ' + Math.round(savedRate * 100) + '%.', 'info');
+  }
+  var etaTxt = '';
+  if (tgtE > b.emergency) {
+    var wk = dep28 / 4;
+    etaTxt = wk > 0 ? 'Dengan ritme setoran sekarang, dana darurat tercapai ±' + Math.ceil((tgtE - b.emergency) / wk) + ' minggu lagi.' : 'Belum ada setoran dana darurat 4 minggu terakhir.';
+    add(40, '🛡️', 'Dana darurat ' + Math.round(b.emergency / tgtE * 100) + '%', etaTxt, 'info');
+  }
+  if (!acts.length) add(10, '✅', 'Keuanganmu stabil', 'Pertahankan pola ini. Hari paling boros biasanya ' + HARI[topWd] + ', jadi siapkan jatah lebih.', 'good');
+  acts.sort(function (x, y) { return y.pr - x.pr; });
+
+  var headline = b.main <= 0 ? 'Uang likuid habis. Fokus pulihkan saldo dulu.'
+    : 'Aman jajan maksimal <b>' + rupiah(safeDaily) + '/hari</b> selama ±' + left + ' hari ke pemasukan berikutnya.';
+  return { score: score, level: level, comp: comp, burn: burn, runway: runway, safeDaily: safeDaily, left: left, proj: proj,
+           series: series, anomalies: anomalies, actions: acts.slice(0, 5), headline: headline, topWd: topWd, savedRate: savedRate };
+}
+function spentToday() { return sumExpenseOn(todayISO()); }
+
+function mtScoreColor(s) { return s >= 80 ? 'var(--emerald)' : s >= 60 ? 'var(--cyan)' : s >= 40 ? 'var(--gold)' : 'var(--coral)'; }
+function mtRing(score) {
+  var c = 2 * Math.PI * 42;
+  return '<svg class="mt-ring" viewBox="0 0 100 100" role="img" aria-label="Skor ' + score + ' dari 100"><circle cx="50" cy="50" r="42" class="trk"/>' +
+    '<circle cx="50" cy="50" r="42" class="bar" transform="rotate(-90 50 50)" style="stroke:' + mtScoreColor(score) + ';stroke-dasharray:' + c.toFixed(1) +
+    ';stroke-dashoffset:' + (c * (1 - score / 100)).toFixed(1) + '"/><text x="50" y="58" text-anchor="middle" class="sc">' + score + '</text></svg>';
+}
+function mtChip(ic, k, v) { return '<div class="mt-chip"><span class="k">' + ic + ' ' + k + '</span><span class="v">' + v + '</span></div>'; }
+function mtHeroCard(b) {
+  var a = mtBrain(b);
+  return '<div class="card mt-hero"><div class="mt-hero-top">' + mtRing(a.score) +
+    '<div><div class="mt-eyebrow">Skor kesehatan keuangan</div><div class="mt-level">' + a.level + '</div><div class="mt-sub">' + a.headline + '</div></div></div>' +
+    '<div class="mt-chips">' + mtChip('🔥', 'Burn/hari', rupiah(a.burn)) + mtChip('🛟', 'Aman/hari', rupiah(a.safeDaily)) +
+    mtChip('⏳', 'Bertahan', a.runway === null ? '—' : Math.floor(a.runway) + ' hari') + '</div></div>';
+}
+function pageDashboard(b) { return mtHeroCard(b) + pageDashboardBase(b); }
+
+var MT_COMP_LABEL = { buffer: ['🛟', 'Bantalan uang'], discipline: ['🎯', 'Disiplin anggaran'], saving: ['💰', 'Rasio menabung'], emergency: ['🛡️', 'Dana darurat'], debt: ['🤝', 'Kesehatan utang'] };
+function pageAI(b) {
+  var a = mtBrain(b);
+  var html = mtHeroCard(b).replace('Skor kesehatan keuangan', 'Analisis On-Device • Skor kesehatan');
+  html += '<div class="grid grid-2">' +
+    statCard('Proyeksi akhir bulan', rupiah(a.proj), '📈', 'val-cyan', 'pengeluaran bulan ini') +
+    statCard('Hari paling boros', HARI[a.topWd], '📅', 'val-gold', '4 minggu terakhir') + '</div>';
+  html += '<div class="card"><div class="card-title"><span class="ic">🧭</span> Prioritas untukmu</div>' +
+    a.actions.map(function (x) { return '<div class="advice mt-act ' + x.tone + '"><div class="hd"><strong>' + x.icon + ' ' + x.title + '</strong></div><p>' + x.text + '</p></div>'; }).join('') + '</div>';
+  html += '<div class="card"><div class="card-title"><span class="ic">📊</span> Pengeluaran 14 hari <span class="badge info">merah = lewat anggaran</span></div>' +
+    barChart(a.series.map(function (x) { return { label: x.iso.slice(8), value: x.v, color: x.v > dailyBudgetFor(x.iso) ? '#FF6B78' : '#35D39A' }; }), 150) + '</div>';
+  html += '<div class="card"><div class="card-title"><span class="ic">🧬</span> Komponen skor</div>' +
+    Object.keys(a.comp).map(function (k) {
+      var v = Math.round(a.comp[k]);
+      return '<div class="kv"><span class="k">' + MT_COMP_LABEL[k][0] + ' ' + MT_COMP_LABEL[k][1] + '</span><span class="v">' + v + '</span></div><div class="mt-bar"><i style="width:' + v + '%;background:' + mtScoreColor(v) + '"></i></div>';
+    }).join('') + '</div>';
+  if (a.anomalies.length) html += '<div class="card"><div class="card-title"><span class="ic">🔎</span> Anomali terdeteksi</div>' +
+    a.anomalies.map(function (t) { return '<div class="advice"><p>' + t + '</p></div>'; }).join('') + '</div>';
+  return html + pageAIClassic(b);
+}
+
+function mtCountUp(root) {
+  if (mtReducedMotion() || !root.querySelectorAll) return;
+  var els = root.querySelectorAll('.stat .val, .stat .v, .kv .v, .mt-chip .v'), n = 0, jobs = [];
+  for (var i = 0; i < els.length && n < 24; i++) {
+    var el = els[i]; if (el.children.length) continue;
+    var m = /^(-?)Rp[\s\u00a0]*([\d.]+)$/.exec((el.textContent || '').trim());
+    if (!m) continue;
+    var target = parseInt(m[2].replace(/\./g, ''), 10); if (!target) continue;
+    jobs.push({ el: el, final: el.textContent, sign: m[1] ? -1 : 1, target: target }); n++;
+  }
+  if (!jobs.length) return;
+  var tok = (mtCountUp.tok = (mtCountUp.tok || 0) + 1), t0 = performance.now();
+  function frame(now) {
+    if (tok !== mtCountUp.tok) return;
+    var p = Math.min(1, (now - t0) / 700), e = 1 - Math.pow(1 - p, 3);
+    jobs.forEach(function (j) { j.el.textContent = p >= 1 ? j.final : rupiah(j.sign * Math.round(j.target * e)); });
+    if (p < 1) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
 }
 
 function openDrawer() {
@@ -5228,16 +5553,7 @@ function init() {
   bindGlobalEvents();
   renderPage();
 
-  // Daftarkan Service Worker untuk mode Offline
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js')
-      .then(reg => console.log('Service Worker aktif!'))
-      .catch(err => console.log('Service Worker gagal:', err));
-  });
-}
-
-  console.log('MoneyTrack v2 siap. Total uang:', computeBalances().totalMoney);
+  mtPremiumInit();
 }
 
 if (document.readyState === 'loading') {

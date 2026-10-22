@@ -2043,3 +2043,119 @@ body.coffee .btn-primary {
   background: linear-gradient(135deg, rgba(212,163,115,.9), rgba(250,237,205,.8));
   color: #2C1A14;
 }
+
+
+/* ============================================================
+   MoneyTrack — PREMIUM LAYER v2.1 (override, selalu paling bawah)
+   ============================================================ */
+body{
+  --ease:cubic-bezier(.22,1,.36,1);
+  --spring:cubic-bezier(.34,1.56,.64,1);
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  font-variant-numeric:tabular-nums;
+  overscroll-behavior-y:none;
+}
+html{-webkit-text-size-adjust:100%}
+button,a,input,select,textarea,[data-act],[data-nav],[data-cal]{touch-action:manipulation}
+
+/* Logo SVG */
+.logo-svg{width:100%;height:100%;display:block}
+.brand-logo{background:none!important;box-shadow:none!important;padding:0!important;display:grid;place-items:center;
+  filter:drop-shadow(0 6px 14px rgba(53,211,154,.35))}
+.mt-splash-logo{background:none!important;box-shadow:none!important;display:grid;place-items:center}
+.mt-splash-logo .logo-svg{width:88px;height:88px}
+
+/* Sentuhan & transisi */
+.btn,.icon-btn{position:relative;overflow:hidden;-webkit-user-select:none;user-select:none;
+  transition:transform .22s var(--ease),box-shadow .22s var(--ease),background-color .22s var(--ease),opacity .22s}
+.btn:active,.icon-btn:active{transform:scale(.95)}
+.nav-item{transition:transform .25s var(--ease),background-color .25s var(--ease)}
+.nav-item:active{transform:scale(.97)}
+.progress>i{transition:width .9s var(--ease)}
+@media (hover:hover) and (pointer:fine){
+  .card{transition:transform .3s var(--ease),box-shadow .3s var(--ease)}
+  .card:hover{transform:translateY(-2px)}
+}
+
+/* Animasi masuk halaman: elemen muncul berurutan (stagger) */
+@keyframes mtRise{from{opacity:0;transform:translate3d(0,14px,0) scale(.985)}to{opacity:1;transform:none}}
+@keyframes mtPop{0%{opacity:0;transform:scale(.9)}60%{transform:scale(1.03)}100%{opacity:1;transform:none}}
+#content.mt-animating>*{animation:mtRise .6s var(--ease) both}
+#content.mt-animating>*:nth-child(2){animation-delay:.06s}
+#content.mt-animating>*:nth-child(3){animation-delay:.12s}
+#content.mt-animating>*:nth-child(4){animation-delay:.18s}
+#content.mt-animating>*:nth-child(5){animation-delay:.24s}
+#content.mt-animating>*:nth-child(6){animation-delay:.30s}
+#content.mt-animating>*:nth-child(n+7){animation-delay:.36s}
+.toast{animation:mtPop .42s var(--spring) both}
+
+/* Performa Android: buang blur mahal di elemen yang banyak/bergerak */
+@media (hover:none),(pointer:coarse),(max-width:820px){
+  .card,.drawer-backdrop,.modal-backdrop,.loading,.mt-orbit::before,.mt-orbit-coin,.mt-particles span{
+    -webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+  .mt-orbit::before,.mt-orbit-coin,.mt-particles span,.mt-splash-bg span{filter:none!important}
+  .topbar,.bottomnav{-webkit-backdrop-filter:blur(10px)!important;backdrop-filter:blur(10px)!important}
+}
+body.mt-paused *,body.mt-paused *::before,body.mt-paused *::after{animation-play-state:paused!important}
+.mt-lite .mt-particles{display:none!important}
+
+@media (prefers-reduced-motion:reduce){
+  #content.mt-animating>*,.toast{animation:none!important}
+}
+
+/* ============================================================
+   PREMIUM MODERN v3 — semua halaman (pakai variabel tema yang ada)
+   ============================================================ */
+body{--r:20px}
+.card{border-radius:var(--r);background:linear-gradient(160deg,var(--glass2),var(--glass));border:1px solid var(--border);
+  box-shadow:0 1px 0 rgba(255,255,255,.06) inset,0 16px 36px -20px rgba(0,0,0,.6)}
+.card-title{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.01em}
+.card-title .ic{display:grid;place-items:center;width:32px;height:32px;border-radius:11px;font-size:16px;flex:none;
+  background:linear-gradient(135deg,rgba(53,211,154,.22),rgba(101,216,242,.16))}
+.kv{padding:11px 0;border-bottom:1px dashed var(--border)}
+.kv:last-child{border-bottom:0}
+.kv .v{font-weight:700}
+.stat{border-radius:18px;position:relative;overflow:hidden}
+.stat .val{font-size:clamp(17px,5vw,22px);font-weight:800;letter-spacing:-.02em}
+.btn{border-radius:14px;min-height:44px;font-weight:700}
+.btn-sm{min-height:36px;border-radius:12px}
+.btn-primary{background:linear-gradient(135deg,var(--emerald),var(--cyan));color:#04281D;box-shadow:0 10px 24px -10px rgba(53,211,154,.7)}
+.btn-gold{background:linear-gradient(135deg,var(--gold),#F7E3A1);color:#3A2A00}
+input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea{font-size:16px;min-height:48px;border-radius:14px;
+  transition:box-shadow .2s var(--ease),border-color .2s var(--ease)}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--emerald);box-shadow:0 0 0 4px rgba(53,211,154,.16)}
+.tx{border-radius:16px;transition:background .2s}
+.tx:active{background:var(--glass2)}
+.tx-ic{display:grid;place-items:center;width:42px;height:42px;border-radius:14px;background:linear-gradient(135deg,var(--glass2),var(--glass))}
+.badge{border-radius:999px;font-weight:700}
+.advice{border-radius:14px}
+
+.mt-hero{position:relative;overflow:hidden;background:radial-gradient(120% 90% at 100% 0%,rgba(53,211,154,.20),transparent 60%),linear-gradient(160deg,var(--glass2),var(--glass))}
+.mt-hero-top{display:flex;gap:16px;align-items:center}
+.mt-ring{width:104px;height:104px;flex:none}
+.mt-ring .trk{fill:none;stroke:var(--border);stroke-width:9}
+.mt-ring .bar{fill:none;stroke-width:9;stroke-linecap:round;animation:mtRing 1.3s var(--ease) .15s both}
+.mt-ring .sc{font-size:30px;font-weight:800;fill:var(--text)}
+@keyframes mtRing{from{stroke-dashoffset:264}}
+.mt-eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.mt-level{font-size:22px;font-weight:800;letter-spacing:-.02em;margin:2px 0 4px}
+.mt-sub{font-size:13px;line-height:1.5;color:var(--muted)}
+.mt-sub b{color:var(--text)}
+.mt-chips{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:16px}
+.mt-chip{padding:10px;border-radius:14px;background:var(--glass);border:1px solid var(--border);min-width:0}
+.mt-chip .k{display:block;font-size:11px;color:var(--muted)}
+.mt-chip .v{display:block;font-weight:800;font-size:14px;margin-top:2px;white-space:nowrap}
+.mt-bar{height:8px;border-radius:99px;background:var(--glass2);overflow:hidden;margin:2px 0 6px}
+.mt-bar i{display:block;height:100%;border-radius:inherit;transform-origin:left;animation:mtGrow .9s var(--ease) both}
+@keyframes mtGrow{from{transform:scaleX(0)}}
+.mt-act{border-left:3px solid var(--cyan)}
+.mt-act.crit{border-left-color:var(--coral)}
+.mt-act.warn{border-left-color:var(--gold)}
+.mt-act.good{border-left-color:var(--emerald)}
+
+@media (max-width:820px){
+  .bottomnav{left:12px;right:12px;bottom:calc(10px + env(safe-area-inset-bottom));border-radius:22px;border:1px solid var(--border);
+    box-shadow:0 18px 40px -14px rgba(0,0,0,.65)}
+  .content{padding-bottom:calc(108px + env(safe-area-inset-bottom))}
+}

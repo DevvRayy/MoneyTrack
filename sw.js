@@ -1,5 +1,5 @@
 /* MoneyTrack service worker — naikkan VERSION setiap kali kamu mengubah file */
-const VERSION = 'v3';
+const VERSION = 'v4';
 const CACHE = 'moneytrack-' + VERSION;
 const CORE = ['./', './index.html', './style.css', './script.js', './manifest.json', './icon-192.png', './icon-512.png'];
 

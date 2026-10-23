@@ -54,7 +54,7 @@ var DENOMS = [100000, 50000, 20000, 10000, 5000, 2000, 1000, 500, 200, 100];
 
 var EXPENSE_CATEGORIES = [
   'Makanan','Minuman','Transportasi','Kebutuhan Sekolah','Kesehatan',
-  'Hiburan','Gym / Olahraga','Tabungan','Bayar Utang','Lainnya'
+  'Hiburan','Gym / Olahraga','Kuota / Pulsa','Tagihan','Tabungan','Bayar Utang','Lainnya'
 ];
 
 var INCOME_CATEGORIES = [
@@ -607,6 +607,26 @@ function sumIncomeOn(iso) {
   txOnDate(iso).forEach(function (t) { if (t.type === 'income') s += Number(t.amount) || 0; });
   return s;
 }
+var NEED_CATEGORIES = ['Kebutuhan Sekolah', 'Kesehatan', 'Kuota / Pulsa', 'Tagihan', 'Tabungan', 'Bayar Utang'];
+function isNeedTx(t) {
+  if (t.isNeed === true) return true;
+  if (t.isNeed === false) return false;
+  return NEED_CATEGORIES.indexOf(t.category) >= 0;
+}
+function sumBudgetOn(iso) {
+  var s = 0;
+  txOnDate(iso).forEach(function (t) { if (t.type === 'expense' && !isNeedTx(t)) s += Number(t.amount) || 0; });
+  return s;
+}
+function sumNeedOn(iso) {
+  var s = 0;
+  txOnDate(iso).forEach(function (t) { if (t.type === 'expense' && isNeedTx(t)) s += Number(t.amount) || 0; });
+  return s;
+}
+function needNote(iso) {
+  var n = sumNeedOn(iso);
+  return n > 0 ? '<span class="mt-need">🧾 Kebutuhan ' + rupiah(n) + ' tidak dihitung ke anggaran jajan.</span>' : '';
+}
 function sumExpenseOn(iso) {
   var s = 0;
   txOnDate(iso).forEach(function (t) { if (t.type === 'expense') s += Number(t.amount) || 0; });
@@ -755,6 +775,7 @@ function afterRender(page) {
    ============================================================ */
 
 function statCard(label, value, icon, cls, sub) {
+  if (/^-\s?Rp/.test(String(value)) && /val-(emerald|cyan|gold)/.test(cls || '')) cls = 'val-coral';
   return '<div class="stat">' +
     '<div class="lbl"><span>' + icon + '</span><span>' + esc(label) + '</span></div>' +
     '<div class="val ' + (cls || '') + '">' + value + '</div>' +
@@ -878,7 +899,7 @@ function txRow(t) {
 function pageDashboardBase(b) {
   var today = todayISO();
   var budget = dailyBudgetFor(today);
-  var spentToday = sumExpenseOn(today);
+  var spentToday = sumBudgetOn(today);
   var remainToday = budget - spentToday;
   var pctToday = budget > 0 ? Math.min(100, (spentToday / budget) * 100) : (spentToday > 0 ? 100 : 0);
 
@@ -917,7 +938,7 @@ function pageDashboardBase(b) {
       '<span class="card-sub">' + esc(fmtTanggal(today)) + '</span></div>' +
     '<div class="grid grid-3" style="margin-bottom:12px">' +
       statCard('Batas Anggaran', rupiah(budget), '🎯', 'val-cyan') +
-      statCard('Total Pengeluaran', rupiah(spentToday), '💸', 'val-coral') +
+      statCard('Jajan Terpakai', rupiah(spentToday), '💸', 'val-coral') +
       statCard('Sisa Anggaran', rupiah(remainToday), remainToday < 0 ? '⚠️' : '✅',
         remainToday < 0 ? 'val-coral' : 'val-emerald') +
     '</div>' +
@@ -925,7 +946,7 @@ function pageDashboardBase(b) {
     '<div class="help">' +
       (remainToday < 0
         ? 'Pengeluaran melebihi batas sebesar ' + rupiah(Math.abs(remainToday)) + '.'
-        : 'Sisa anggaran hari ini ' + rupiah(remainToday) + '.') +
+        : 'Sisa anggaran hari ini ' + rupiah(remainToday) + '.') + needNote(today) +
     '</div>' +
   '</div>';
 
@@ -1153,10 +1174,10 @@ function pageExpense(b) {
 
   var today = todayISO();
   var budget = dailyBudgetFor(today);
-  var spentToday = sumExpenseOn(today);
+  var spentToday = sumBudgetOn(today);
 
   return '<div class="grid grid-3" style="margin-bottom:14px">' +
-    statCard('Hari Ini', rupiah(spentToday), '💸', 'val-coral', 'Batas ' + rupiah(budget)) +
+    statCard('Jajan Hari Ini', rupiah(spentToday), '💸', 'val-coral', 'Batas ' + rupiah(budget) + (sumNeedOn(today) > 0 ? ' • +' + rupiah(sumNeedOn(today)) + ' kebutuhan' : '')) +
     statCard('Sisa Anggaran', rupiah(budget - spentToday), '🎯',
       budget - spentToday < 0 ? 'val-coral' : 'val-emerald') +
     statCard('Total Ditampilkan', rupiah(total), '📋', 'val-cyan', list.length + ' item') +
@@ -1370,7 +1391,7 @@ function recommendEmergency(b) {
   var free = b.saldoBebas;
   var today = todayISO();
   var budget = dailyBudgetFor(today);
-  var spent = sumExpenseOn(today);
+  var spent = sumBudgetOn(today);
   var remainBudget = Math.max(0, budget - spent);
 
   var upcoming = state.predictions.filter(function (p) {
@@ -1484,7 +1505,7 @@ function estimateSavings(b, target) {
 function recommendSavings(b) {
   var free = b.saldoBebas;
   var today = todayISO();
-  var remainBudget = Math.max(0, dailyBudgetFor(today) - sumExpenseOn(today));
+  var remainBudget = Math.max(0, dailyBudgetFor(today) - sumBudgetOn(today));
   var upcoming = state.predictions.filter(function (p) {
     return p.status === 'planned' && p.date >= today;
   }).reduce(function (s, p) { return s + (Number(p.amount) || 0); }, 0);
@@ -1558,7 +1579,7 @@ function pageGold(b) {
 
 function recommendGold(b) {
   var today = todayISO();
-  var remainBudget = Math.max(0, dailyBudgetFor(today) - sumExpenseOn(today));
+  var remainBudget = Math.max(0, dailyBudgetFor(today) - sumBudgetOn(today));
   var upcoming = state.predictions.filter(function (p) {
     return p.status === 'planned' && p.date >= today;
   }).reduce(function (s, p) { return s + (Number(p.amount) || 0); }, 0);
@@ -1605,8 +1626,8 @@ function pageSnack(b) {
 
   var satBudget = sat ? dailyBudgetFor(sat) : 0;
   var sunBudget = sun ? dailyBudgetFor(sun) : 0;
-  var satSpent = sat ? sumExpenseOn(sat) : 0;
-  var sunSpent = sun ? sumExpenseOn(sun) : 0;
+  var satSpent = sat ? sumBudgetOn(sat) : 0;
+  var sunSpent = sun ? sumBudgetOn(sun) : 0;
   var weekendSpent = satSpent + sunSpent;
   var weekendBudget = satBudget + sunBudget;
   var weekendLeft = weekendBudget - weekendSpent;
@@ -1662,10 +1683,10 @@ function pageSnack(b) {
   '<div class="card">' +
     '<div class="card-title"><span class="ic">💡</span> Simulasi Hari Ini</div>' +
     '<div class="kv"><span class="k">Batas jajan</span><span class="v val-cyan">' + rupiah(todayBudget) + '</span></div>' +
-    '<div class="kv"><span class="k">Pengeluaran aktual</span><span class="v val-coral">' + rupiah(sumExpenseOn(today)) + '</span></div>' +
+    '<div class="kv"><span class="k">Pengeluaran aktual</span><span class="v val-coral">' + rupiah(sumBudgetOn(today)) + '</span></div>' +
     '<div class="kv"><span class="k">Sisa</span><span class="v ' +
-      (todayBudget - sumExpenseOn(today) < 0 ? 'val-coral' : 'val-emerald') + '">' +
-      rupiah(todayBudget - sumExpenseOn(today)) + '</span></div>' +
+      (todayBudget - sumBudgetOn(today) < 0 ? 'val-coral' : 'val-emerald') + '">' +
+      rupiah(todayBudget - sumBudgetOn(today)) + '</span></div>' +
   '</div>';
 
   var snackTx = allTx().filter(function (t) {
@@ -1962,7 +1983,7 @@ function pageAIClassic(b) {
     '<div class="kv"><span class="k">Dana darurat</span><span class="v val-cyan">' + rupiah(b.emergency) + '</span></div>' +
     '<div class="kv"><span class="k">Dana eMas</span><span class="v val-gold">' + rupiah(b.goldFund) + '</span></div>' +
     '<div class="kv"><span class="k">Pengeluaran hari ini</span><span class="v val-coral">' +
-      rupiah(sumExpenseOn(a.today)) + '</span></div>' +
+      rupiah(sumBudgetOn(a.today)) + '</span></div>' +
     '<div class="kv"><span class="k">Batas hari ini</span><span class="v val-cyan">' + rupiah(a.budget) + '</span></div>' +
   '</div>';
 
@@ -2002,7 +2023,7 @@ function adviceBlock(title, text) {
 function analyze(b) {
   var today = todayISO();
   var budget = dailyBudgetFor(today);
-  var spentToday = sumExpenseOn(today);
+  var spentToday = sumBudgetOn(today);
   var remainBudget = budget - spentToday;
   var free = b.saldoBebas;
 
@@ -2153,7 +2174,7 @@ function detectPatterns() {
   var today = todayISO();
   var patterns = [];
 
-  var spentToday = sumExpenseOn(today);
+  var spentToday = sumBudgetOn(today);
   var budget = dailyBudgetFor(today);
   if (budget > 0 && spentToday > budget * 1.3) {
     patterns.push({
@@ -2221,7 +2242,7 @@ function detectPatterns() {
   for (var i = 0; i < 7; i++) {
     var d = isoOf(new Date(parseISO(today).getTime() - i * 86400000));
     var bud = dailyBudgetFor(d);
-    if (bud > 0 && sumExpenseOn(d) >= bud * 0.95) zeroDays++;
+    if (bud > 0 && sumBudgetOn(d) >= bud * 0.95) zeroDays++;
   }
   if (zeroDays >= 4) {
     patterns.push({
@@ -2236,7 +2257,7 @@ function detectPatterns() {
   var free = b.saldoBebas;
   var avgSpend = 0;
   for (var j = 0; j < 7; j++) {
-    avgSpend += sumExpenseOn(isoOf(new Date(parseISO(today).getTime() - j * 86400000)));
+    avgSpend += sumBudgetOn(isoOf(new Date(parseISO(today).getTime() - j * 86400000)));
   }
   avgSpend /= 7;
 
@@ -2257,7 +2278,7 @@ function detectPatterns() {
   for (var k = 1; k <= 7; k++) {
     var dk = isoOf(new Date(parseISO(today).getTime() - k * 86400000));
     var bk = dailyBudgetFor(dk);
-    var spk = sumExpenseOn(dk);
+    var spk = sumBudgetOn(dk);
     if (bk > 0 && spk > 0 && spk < bk * 0.6) goodDays++;
   }
   if (goodDays >= 3) {
@@ -2630,176 +2651,202 @@ function attachHistoryListeners() {
    BAGIAN 22 — KALENDER
    ============================================================ */
 
-var calCursor = null;
+var calCursor = null, calSel = null;
+function mtShort(v) {
+  v = Math.round(Number(v) || 0);
+  if (v >= 1e6) return (v / 1e6).toFixed(1).replace('.0', '') + 'jt';
+  if (v >= 1000) return Math.round(v / 1000) + 'rb';
+  return String(v);
+}
 
 function pageCalendar(b) {
-  if (!calCursor) {
-    var t = parseISO(todayISO());
-    calCursor = { y: t.getFullYear(), m: t.getMonth() };
-  }
-  var y = calCursor.y, m = calCursor.m;
-  var lastDay = new Date(y, m + 1, 0).getDate();
-  var startOffset = (new Date(y, m, 1).getDay() + 6) % 7;
-
-  var cells = [];
-  for (var i = 0; i < startOffset; i++) {
-    cells.push({ iso: isoOf(new Date(y, m, 1 - (startOffset - i))), out: true });
-  }
-  for (var d = 1; d <= lastDay; d++) {
-    cells.push({ iso: isoOf(new Date(y, m, d)), out: false });
-  }
-  while (cells.length % 7 !== 0) {
-    var last = cells[cells.length - 1];
-    var nd = parseISO(last.iso);
-    nd.setDate(nd.getDate() + 1);
-    cells.push({ iso: isoOf(nd), out: true });
-  }
-
   var today = todayISO();
-  var dows = ['Sen','Sel','Rab','Kam','Jum','Sab','Min'];
-  var grid = dows.map(function (d) { return '<div class="cal-dow">' + d + '</div>'; }).join('');
+  if (!calCursor) { var t0 = parseISO(today); calCursor = { y: t0.getFullYear(), m: t0.getMonth() }; }
+  var y = calCursor.y, m = calCursor.m, key = y + '-' + pad2(m + 1);
+  var last = new Date(y, m + 1, 0).getDate(), off = (new Date(y, m, 1).getDay() + 6) % 7;
 
-  var allDates = allTx();
-  cells.forEach(function (c) {
-    var hasIn = allDates.some(function (t) { return t.date === c.iso && t.type === 'income'; });
-    var hasOut = allDates.some(function (t) { return t.date === c.iso && (t.type === 'expense' || t.type === 'goldBuy'); });
-    var dots = '';
-    if (hasIn) dots += '<span class="dot dot-in"></span>';
-    if (hasOut) dots += '<span class="dot dot-out"></span>';
-    grid += '<div class="cal-day' + (c.out ? ' out' : '') + (c.iso === today ? ' today' : '') +
-      '" data-cal="' + c.iso + '">' +
-      '<span>' + parseISO(c.iso).getDate() + '</span>' +
-      '<span class="dots">' + dots + '</span>' +
-    '</div>';
+  var map = {}, incM = 0, expM = 0;
+  allTx().forEach(function (t) {
+    if (monthKey(t.date) !== key) return;
+    var d = map[t.date] || (map[t.date] = { inc: 0, sp: 0, need: 0, n: 0 }), a = Number(t.amount) || 0;
+    d.n++;
+    if (t.type === 'income') { d.inc += a; if (t.category !== 'Pinjaman Masuk') incM += a; }
+    else if (t.type === 'expense') { expM += a; if (isNeedTx(t)) d.need += a; else d.sp += a; }
   });
+  if (!calSel || monthKey(calSel) !== key) calSel = (monthKey(today) === key) ? today : key + '-01';
 
-  var monthTx = allDates.filter(function (t) { return monthKey(t.date) === (y + '-' + pad2(m + 1)); });
-  var incM = 0, expM = 0;
-  monthTx.forEach(function (t) {
-    if (t.type === 'income') incM += Number(t.amount) || 0;
-    if (t.type === 'expense') expM += Number(t.amount) || 0;
-  });
+  var okDays = 0, doneDays = 0;
+  var grid = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'].map(function (d) { return '<div class="c2-dow">' + d + '</div>'; }).join('');
+  for (var i = 0; i < off; i++) grid += '<div class="c2-day blank"></div>';
+  for (var d = 1; d <= last; d++) {
+    var iso = key + '-' + pad2(d), s = map[iso] || { inc: 0, sp: 0, need: 0, n: 0 }, bud = dailyBudgetFor(iso), lvl = 'e';
+    if (iso > today) lvl = 'fut';
+    else if (s.n) {
+      var r = bud > 0 ? s.sp / bud : (s.sp > 0 ? 2 : 0);
+      lvl = r <= 0.6 ? 'g' : r <= 1 ? 'y' : 'r';
+      doneDays++; if (r <= 1) okDays++;
+    }
+    grid += '<div class="c2-day ' + lvl + (iso === today ? ' today' : '') + (iso === calSel ? ' sel' : '') + '" data-cal="' + iso +
+      '" role="button" tabindex="0" style="--n:' + (off + d) + '"><b>' + d + '</b><small>' + (s.sp > 0 ? mtShort(s.sp) : '') + '</small>' +
+      (s.inc > 0 ? '<i class="c2-in"></i>' : '') + (s.need > 0 ? '<i class="c2-nd"></i>' : '') + '</div>';
+  }
 
-  return '<div class="card">' +
-    '<div class="cal-head">' +
-      '<button class="icon-btn" data-act="cal-prev">‹</button>' +
-      '<div style="flex:1;text-align:center;font-weight:700">' + BULAN[m] + ' ' + y + '</div>' +
-      '<button class="icon-btn" data-act="cal-next">›</button>' +
-    '</div>' +
-    '<div class="cal-grid">' + grid + '</div>' +
-    '<div class="legend">' +
-      '<span><i style="background:#35D39A"></i>Pemasukan</span>' +
-      '<span><i style="background:#FF6B78"></i>Pengeluaran</span>' +
-    '</div>' +
+  var chip = function (ic, k, v, cls) { return '<div class="mt-chip"><span class="k">' + ic + ' ' + k + '</span><span class="v ' + cls + '">' + v + '</span></div>'; };
+  return '<div class="card c2-card">' +
+    '<div class="c2-head"><button class="icon-btn" data-act="cal-prev" aria-label="Bulan sebelumnya">‹</button>' +
+      '<div class="c2-title"><b>' + BULAN[m] + '</b><span>' + y + '</span></div>' +
+      '<button class="icon-btn" data-act="cal-next" aria-label="Bulan berikutnya">›</button></div>' +
+    (monthKey(today) !== key ? '<div style="text-align:center;margin:-4px 0 12px"><button class="btn btn-sm" data-act="cal-today">↩ Ke hari ini</button></div>' : '') +
+    '<div class="c2-sum">' + chip('💵', 'Masuk', rupiah(incM), 'val-emerald') + chip('💸', 'Keluar', rupiah(expM), 'val-coral') +
+      chip(incM >= expM ? '📈' : '📉', 'Selisih', rupiah(incM - expM), incM >= expM ? 'val-emerald' : 'val-coral') + '</div>' +
+    '<div class="c2-grid">' + grid + '</div>' +
+    '<div class="c2-leg"><span><i style="background:rgba(53,211,154,.55)"></i>Hemat</span><span><i style="background:rgba(232,199,106,.7)"></i>Hampir</span>' +
+      '<span><i style="background:rgba(255,107,120,.7)"></i>Lewat</span><span><i style="background:var(--emerald);border-radius:50%"></i>Masuk</span>' +
+      '<span><i style="background:var(--cyan);border-radius:50%"></i>Kebutuhan</span></div>' +
+    (doneDays ? '<div class="c2-note">✨ <b>' + okDays + ' dari ' + doneDays + '</b> hari tercatat masih di bawah anggaran jajan.</div>' : '') +
   '</div>' +
+  '<div class="card" id="calDetail">' + calDetailHTML(calSel) + '</div>';
+}
 
-  '<div class="grid grid-2" style="margin-bottom:14px">' +
-    statCard('Pemasukan Bulan', rupiah(incM), '💵', 'val-emerald') +
-    statCard('Pengeluaran Bulan', rupiah(expM), '💸', 'val-coral') +
-  '</div>' +
-
-  '<div class="card" id="calDetail">' +
-    '<div class="card-title"><span class="ic">📅</span> Detail Tanggal</div>' +
-    '<div class="help">Ketuk tanggal untuk melihat transaksi.</div>' +
-  '</div>';
+function calDetailHTML(iso) {
+  var list = allTx().filter(function (t) { return t.date === iso; });
+  var bud = dailyBudgetFor(iso), sp = sumBudgetOn(iso), inc = sumIncomeOn(iso), left = bud - sp;
+  var pct = bud > 0 ? Math.min(100, sp / bud * 100) : (sp > 0 ? 100 : 0);
+  return '<div class="c2-dhead"><div><div class="mt-eyebrow">' + HARI[parseISO(iso).getDay()] + '</div>' +
+      '<div class="c2-dtitle">' + esc(fmtTanggal(iso)) + '</div></div>' +
+    '<div class="c2-dpill ' + (left < 0 ? 'r' : 'g') + '">' + (bud > 0 ? (left < 0 ? 'Lewat ' + rupiah(-left) : 'Sisa ' + rupiah(left)) : 'Tanpa batas') + '</div></div>' +
+    '<div class="mt-bar"><i style="width:' + pct.toFixed(0) + '%;background:' + (left < 0 ? 'var(--coral)' : pct > 75 ? 'var(--gold)' : 'var(--emerald)') + '"></i></div>' +
+    '<div class="c2-dstats"><span>🍜 Jajan <b>' + rupiah(sp) + '</b> / ' + rupiah(bud) + '</span><span>💵 Masuk <b>' + rupiah(inc) + '</b></span></div>' +
+    needNote(iso) + '<div class="divider"></div>' +
+    (list.length ? list.map(txRow).join('') : '<div class="help">Belum ada transaksi di tanggal ini.</div>') +
+    '<div class="btn-row" style="margin-top:12px"><button class="btn btn-sm btn-danger" data-act="add-expense">+ Pengeluaran</button>' +
+    '<button class="btn btn-sm" data-act="add-income">+ Pemasukan</button></div>';
 }
 
 function showCalendarDetail(iso) {
+  calSel = iso;
   var box = $('#calDetail');
   if (!box) return;
-  var list = allTx().filter(function (t) { return t.date === iso; });
-  var budget = dailyBudgetFor(iso);
-  var spent = sumExpenseOn(iso);
-  var inc = sumIncomeOn(iso);
-
-  box.innerHTML =
-    '<div class="card-title"><span class="ic">📅</span> ' + esc(fmtTanggal(iso)) + '</div>' +
-    '<div class="kv"><span class="k">Pemasukan</span><span class="v val-emerald">' + rupiah(inc) + '</span></div>' +
-    '<div class="kv"><span class="k">Pengeluaran</span><span class="v val-coral">' + rupiah(spent) + '</span></div>' +
-    '<div class="kv"><span class="k">Batas</span><span class="v val-cyan">' + rupiah(budget) + '</span></div>' +
-    '<div class="kv"><span class="k">Sisa</span><span class="v ' +
-      (budget - spent < 0 ? 'val-coral' : 'val-emerald') + '">' + rupiah(budget - spent) + '</span></div>' +
-    '<div class="divider"></div>' +
-    (list.length ? list.map(txRow).join('') : '<div class="help">Tidak ada transaksi.</div>');
+  box.innerHTML = calDetailHTML(iso);
+  var cells = document.querySelectorAll('.c2-day[data-cal]');
+  for (var i = 0; i < cells.length; i++) cells[i].classList.toggle('sel', cells[i].dataset.cal === iso);
+  try { if (box.animate && !mtReducedMotion()) box.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'cubic-bezier(.22,1,.36,1)' }); } catch (e) {}
 }
 
 /* ============================================================
    BAGIAN 23 — STATISTIK
    ============================================================ */
 
+var statsRange = '30';
+var ST_COLORS = ['#35D39A', '#65D8F2', '#8B7BFF', '#E8C76A', '#FF6B78', '#7C8AA5'];
+
+function mtDonut(items, total) {
+  var r = 38, c = 2 * Math.PI * r, off = 0, segs = '';
+  items.forEach(function (it) {
+    var len = total > 0 ? it.value / total * c : 0, vis = Math.max(0, len - 1.6);
+    segs += '<circle class="dn" cx="50" cy="50" r="38" fill="none" stroke="' + it.color + '" stroke-width="12" stroke-dasharray="' + vis.toFixed(2) + ' ' + (c - vis).toFixed(2) +
+      '" stroke-dashoffset="' + (-off).toFixed(2) + '" transform="rotate(-90 50 50)"/>';
+    off += len;
+  });
+  return '<svg class="st-donut" viewBox="0 0 100 100" role="img" aria-label="Komposisi pengeluaran"><circle cx="50" cy="50" r="38" fill="none" stroke="var(--glass2)" stroke-width="12"/>' + segs +
+    '<text x="50" y="47" text-anchor="middle" class="dn-k">Total</text><text x="50" y="60" text-anchor="middle" class="dn-v">' + mtShort(total) + '</text></svg>';
+}
+
+function mtArea(vals, color, budgetLine) {
+  var W = 300, H = 100, n = vals.length, pts = [];
+  var sv = vals.slice().sort(function (x, y) { return x - y; }), p90 = sv[Math.floor(sv.length * 0.9)] || 0;
+  var mx = Math.max(p90 * 1.8, (budgetLine || 0) * 1.5, 1);   /* lonjakan ekstrem dipotong supaya tren lain tetap terbaca */
+  vals.forEach(function (v, i) { pts.push([n === 1 ? W / 2 : i * W / (n - 1), H - 6 - Math.min(v, mx) / mx * (H - 14)]); });
+  var line = pts.map(function (p, i) { return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' ');
+  var by = budgetLine ? H - 6 - budgetLine / mx * (H - 14) : null;
+  return '<svg class="st-area" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="Tren pengeluaran"><defs><linearGradient id="stg" x1="0" y1="0" x2="0" y2="1">' +
+    '<stop offset="0" stop-color="' + color + '" stop-opacity=".38"/><stop offset="1" stop-color="' + color + '" stop-opacity="0"/></linearGradient></defs>' +
+    '<path d="' + line + ' L' + W + ' ' + H + ' L0 ' + H + ' Z" fill="url(#stg)"/>' +
+    '<path d="' + line + '" fill="none" stroke="' + color + '" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>' +
+    (by !== null ? '<line x1="0" x2="' + W + '" y1="' + by.toFixed(1) + '" y2="' + by.toFixed(1) + '" stroke="#E8C76A" stroke-width="1.2" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>' : '') + '</svg>';
+}
+
 function pageStats(b) {
-  var today = todayISO();
-  var mR = monthRange(today);
+  var today = todayISO(), T = parseISO(today);
+  var days = statsRange === '7' ? 7 : statsRange === '90' ? 90 : 30;
+  var from = isoOf(new Date(T.getFullYear(), T.getMonth(), T.getDate() - days + 1));
+  var inc = 0, exp = 0, saved = 0, cat = {}, byDay = {};
+  allTx().forEach(function (t) {
+    if (t.date < from || t.date > today) return;
+    var a = Number(t.amount) || 0;
+    if (t.type === 'income') { if (t.category !== 'Pinjaman Masuk') inc += a; }
+    else if (t.type === 'expense') { exp += a; byDay[t.date] = (byDay[t.date] || 0) + a; var c = t.category || 'Lainnya'; cat[c] = (cat[c] || 0) + a; }
+    else if (t.type === 'transfer' && t.from === 'main' && (t.to === 'emergency' || t.to === 'savings')) saved += a;
+    else if (t.type === 'goldBuy') saved += a;
+  });
 
-  var catMap = expensesByCategory(mR[0], mR[1]);
-  var cats = Object.keys(catMap).map(function (k) {
-    return { label: k.split(' ')[0].slice(0, 7), value: catMap[k], color: '#FF6B78', full: k };
-  }).sort(function (a, c) { return c.value - a.value; }).slice(0, 6);
-
-  var months = [];
-  var base = parseISO(today);
-  for (var i = 5; i >= 0; i--) {
-    var d = new Date(base.getFullYear(), base.getMonth() - i, 1);
-    var key = d.getFullYear() + '-' + pad2(d.getMonth() + 1);
-    var last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-    var a = key + '-01', z = isoOf(last);
-    months.push({
-      label: BULAN[d.getMonth()].slice(0, 3),
-      inc: sumIncomeRange(a, z),
-      exp: sumExpenseRange(a, z)
-    });
+  var vals = [], wd = [0, 0, 0, 0, 0, 0, 0], wdN = [0, 0, 0, 0, 0, 0, 0], peak = 0, peakIso = from;
+  for (var i = 0; i < days; i++) {
+    var di = isoOf(new Date(T.getFullYear(), T.getMonth(), T.getDate() - days + 1 + i)), v = byDay[di] || 0, g = parseISO(di).getDay();
+    vals.push(v); wd[g] += v; wdN[g]++;
+    if (v > peak) { peak = v; peakIso = di; }
   }
+  var net = inc - exp, rate = inc > 0 ? Math.max(0, Math.min(999, Math.round(saved / inc * 100))) : 0;
 
-  var incBars = months.map(function (m) { return { label: m.label, value: m.inc, color: '#35D39A' }; });
-  var expBars = months.map(function (m) { return { label: m.label, value: m.exp, color: '#FF6B78' }; });
+  /* ----- donut kategori ----- */
+  var keys = Object.keys(cat).sort(function (x, y) { return cat[y] - cat[x]; }), items = [];
+  keys.slice(0, 5).forEach(function (k, i) { items.push({ name: k, value: cat[k], color: ST_COLORS[i] }); });
+  if (keys.length > 5) items.push({ name: 'Lainnya', value: keys.slice(5).reduce(function (s, k) { return s + cat[k]; }, 0), color: ST_COLORS[5] });
 
-  var total = b.main + b.emergency + b.savings + b.goldFund + b.unidentified;
-  function pctOf(v) { return total > 0 ? (v / total * 100) : 0; }
+  /* ----- pola hari ----- */
+  var order = [1, 2, 3, 4, 5, 6, 0], names = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+  var avgs = order.map(function (g) { return wdN[g] ? wd[g] / wdN[g] : 0; }), mxA = Math.max.apply(null, avgs.concat([1])), topI = avgs.indexOf(Math.max.apply(null, avgs));
 
-  return '<div class="grid grid-2" style="margin-bottom:14px">' +
-    statCard('Total Uang', rupiah(b.totalMoney), '💰', 'val-emerald') +
-    statCard('Saldo Bebas', rupiah(b.saldoBebas), '✅', 'val-emerald') +
-    statCard('Dana Terpisah', rupiah(b.emergency + b.savings + b.goldFund), '🧊', 'val-cyan') +
-    statCard('Belum Teridentifikasi', rupiah(b.unidentified), '❓',
-      b.unidentified > 0 ? 'val-gold' : 'val-emerald') +
-  '</div>' +
+  /* ----- arus kas 6 bulan ----- */
+  var months = [];
+  for (var k = 5; k >= 0; k--) {
+    var d0 = new Date(T.getFullYear(), T.getMonth() - k, 1), a0 = d0.getFullYear() + '-' + pad2(d0.getMonth() + 1) + '-01', z0 = isoOf(new Date(d0.getFullYear(), d0.getMonth() + 1, 0));
+    months.push({ label: BULAN[d0.getMonth()].slice(0, 3), inc: sumIncomeRange(a0, z0), exp: sumExpenseRange(a0, z0) });
+  }
+  var mxM = Math.max.apply(null, months.reduce(function (r, m) { return r.concat([m.inc, m.exp]); }, [1]));
 
-  '<div class="card">' +
-    '<div class="card-title"><span class="ic">📊</span> Pemasukan 6 Bulan</div>' +
-    barChart(incBars, 150) +
-  '</div>' +
+  /* ----- distribusi dana ----- */
+  var dist = [['Saldo Bebas', Math.max(0, b.saldoBebas), '#35D39A'], ['Uang Jajan', b.snackTotal, '#E8C76A'], ['Dana Darurat', b.emergency, '#65D8F2'],
+              ['Tabungan', b.savings, '#8B7BFF'], ['Dana eMas', b.goldFund, '#FFB36B']];
+  var dTot = dist.reduce(function (s, x) { return s + x[1]; }, 0) || 1;
 
-  '<div class="card">' +
-    '<div class="card-title"><span class="ic">📊</span> Pengeluaran 6 Bulan</div>' +
-    barChart(expBars, 150) +
-  '</div>' +
+  var seg = function (id, label) { return '<button class="' + (statsRange === id ? 'on' : '') + '" data-act="stats-range" data-id="' + id + '">' + label + '</button>'; };
+  var html = '<div class="st-seg">' + seg('7', '7 Hari') + seg('30', '30 Hari') + seg('90', '90 Hari') + '</div>' +
+    '<div class="grid grid-2" style="margin-bottom:14px">' +
+      statCard('Pemasukan', rupiah(inc), '💵', 'val-emerald', 'rata-rata ' + rupiah(inc / days) + '/hari') +
+      statCard('Pengeluaran', rupiah(exp), '💸', 'val-coral', 'rata-rata ' + rupiah(exp / days) + '/hari') +
+      statCard('Selisih', rupiah(net), net >= 0 ? '📈' : '📉', net >= 0 ? 'val-emerald' : 'val-coral', net >= 0 ? 'Surplus' : 'Defisit') +
+      statCard('Rasio Menabung', rate + '%', '🐖', rate >= 20 ? 'val-emerald' : 'val-gold', 'target ideal 20%') +
+    '</div>';
 
-  '<div class="card">' +
-    '<div class="card-title"><span class="ic">🏷️</span> Kategori Terbesar Bulan Ini</div>' +
-    (cats.length ? barChart(cats, 150) +
-      '<div class="legend">' + cats.map(function (c) {
-        return '<span>' + esc(c.full) + ': ' + rupiah(c.value) + '</span>';
-      }).join('') + '</div>'
-    : emptyState('📊', 'Belum ada pengeluaran', 'Catat pengeluaran untuk lihat statistik.')) +
-  '</div>' +
+  html += '<div class="card"><div class="card-title"><span class="ic">🍩</span> Ke Mana Uangmu Pergi</div>' +
+    (items.length ? '<div class="st-donut-wrap">' + mtDonut(items, exp) + '<div class="st-leg">' + items.map(function (it) {
+      return '<div><i style="background:' + it.color + '"></i><span>' + esc(it.name) + '</span><b>' + Math.round(it.value / exp * 100) + '%</b></div>';
+    }).join('') + '</div></div>' : emptyState('🍩', 'Belum ada pengeluaran', 'Catat pengeluaran untuk lihat komposisinya.')) + '</div>';
 
-  '<div class="card">' +
-    '<div class="card-title"><span class="ic">🥧</span> Distribusi Dana</div>' +
-    distRow('Saldo Bebas', b.saldoBebas, pctOf(b.saldoBebas), '#35D39A') +
-    distRow('Uang Jajan', b.snackTotal, pctOf(b.snackTotal), '#E8C76A') +
-    distRow('Dana Darurat', b.emergency, pctOf(b.emergency), '#65D8F2') +
-    distRow('Tabungan', b.savings, pctOf(b.savings), '#8B7BFF') +
-    distRow('Dana eMas', b.goldFund, pctOf(b.goldFund), '#E8C76A') +
-  '</div>' +
+  html += '<div class="card"><div class="card-title"><span class="ic">📈</span> Tren Harian</div>' +
+    mtArea(vals, '#FF6B78', dailyBudgetFor(today)) +
+    '<div class="st-cap"><span>Rata-rata <b>' + rupiah(exp / days) + '</b></span><span>Tertinggi <b>' + rupiah(peak) + '</b>' + (peak ? ' • ' + fmtTanggalPendek(peakIso) : '') + '</span></div>' +
+    '<div class="st-cap" style="margin-top:2px"><span style="color:var(--gold)">- - -</span><span>garis emas = batas anggaran hari ini</span></div></div>';
 
-  '<div class="card">' +
-    '<div class="card-title"><span class="ic">📤</span> Ekspor & Backup</div>' +
-    '<div class="btn-row">' +
-      '<button class="btn btn-sm" data-act="export-csv">⬇️ CSV</button>' +
-      '<button class="btn btn-sm" data-act="backup-json">💾 Backup</button>' +
-      '<button class="btn btn-sm" data-act="restore-json">📥 Restore</button>' +
-    '</div>' +
-  '</div>';
+  html += '<div class="card"><div class="card-title"><span class="ic">📅</span> Hari Paling Boros</div><div class="st-wd">' +
+    avgs.map(function (a, i) { return '<div class="st-wd-i' + (i === topI && a > 0 ? ' top' : '') + '"><i style="--h:' + Math.max(4, a / mxA * 100).toFixed(0) + '%;animation-delay:' + (i * 50) + 'ms"></i><span>' + names[i] + '</span></div>'; }).join('') +
+    '</div><div class="st-cap"><span>' + (avgs[topI] > 0 ? 'Biasanya paling boros hari <b>' + HARI[order[topI]] + '</b> (±' + rupiah(avgs[topI]) + ')' : 'Belum ada data pengeluaran.') + '</span></div></div>';
+
+  html += '<div class="card"><div class="card-title"><span class="ic">💱</span> Arus Kas 6 Bulan <span class="badge info">hijau masuk • merah keluar</span></div><div class="st-pair">' +
+    months.map(function (m, i) {
+      return '<div><div class="bars"><i style="--h:' + Math.max(3, m.inc / mxM * 100).toFixed(0) + '%;background:#35D39A;animation-delay:' + (i * 60) + 'ms"></i>' +
+        '<i style="--h:' + Math.max(3, m.exp / mxM * 100).toFixed(0) + '%;background:#FF6B78;animation-delay:' + (i * 60 + 30) + 'ms"></i></div><span>' + m.label + '</span></div>';
+    }).join('') + '</div></div>';
+
+  html += '<div class="card"><div class="card-title"><span class="ic">🧊</span> Peta Uangmu <span class="card-sub">' + rupiah(b.totalMoney) + '</span></div>' +
+    '<div class="st-stack">' + dist.map(function (x) { return x[1] > 0 ? '<i style="width:' + (x[1] / dTot * 100).toFixed(1) + '%;background:' + x[2] + '"></i>' : ''; }).join('') + '</div>' +
+    '<div class="st-leg">' + dist.map(function (x) { return '<div><i style="background:' + x[2] + '"></i><span>' + x[0] + '</span><b>' + rupiah(x[1]) + '</b></div>'; }).join('') + '</div></div>';
+
+  html += '<div class="card"><div class="card-title"><span class="ic">📤</span> Ekspor & Backup</div><div class="btn-row">' +
+    '<button class="btn btn-sm" data-act="export-csv">⬇️ CSV</button><button class="btn btn-sm" data-act="backup-json">💾 Backup</button>' +
+    '<button class="btn btn-sm" data-act="restore-json">📥 Restore</button></div></div>';
+  return html;
 }
 
 function distRow(label, value, pct, color) {
@@ -3164,6 +3211,7 @@ function openExpenseForm(existing, preset) {
     '<input type="hidden" id="f_method" value="' + (t.method || 'cash') + '" />' +
     '<label class="check"><input type="checkbox" id="f_snack"' + (t.useSnack ? ' checked' : '') +
       ' /> Dibayar dari uang jajan</label>' +
+    '<label class="check"><input type="checkbox" id="f_need"' + (isNeedTx(t) ? ' checked' : '') + ' /> Kebutuhan pokok (tidak memotong anggaran jajan harian)</label>' +
     '<div class="field"><label>Catatan</label><textarea id="f_note">' + esc(t.note || '') + '</textarea></div>' +
     '<div class="help" id="f_info">Saldo bebas: ' + rupiah(b.saldoBebas) + ' • Uang jajan: ' + rupiah(b.snackTotal) + '</div>';
 
@@ -3178,6 +3226,8 @@ function openExpenseForm(existing, preset) {
     }
     accountSel.addEventListener('change', sync);
     sync();
+    var needBox = $('#f_need', root), catSel = $('#f_category', root);
+    catSel.addEventListener('change', function () { needBox.checked = NEED_CATEGORIES.indexOf(catSel.value) >= 0; });
 
     $('#f_save', root).addEventListener('click', function () {
       var date = $('#f_date', root).value;
@@ -3189,6 +3239,7 @@ function openExpenseForm(existing, preset) {
       var method = methodHidden.value;
       var note = $('#f_note', root).value.trim();
       var useSnack = $('#f_snack', root).checked;
+      var isNeed = $('#f_need', root).checked;
 
       if (!date) return toast('Tanggal wajib.', 'err');
       if (!category) return toast('Kategori wajib.', 'err');
@@ -3223,7 +3274,7 @@ function openExpenseForm(existing, preset) {
         date: date, time: time,
         category: category, description: desc,
         amount: amount, account: account, method: method,
-        note: note, useSnack: useSnack, breakdown: {},
+        note: note, useSnack: useSnack, isNeed: isNeed, breakdown: {},
         predictionId: t.predictionId || null, debtId: t.debtId || null,
         createdAt: isEdit ? existing.createdAt : nowStamp()
       };
@@ -4590,6 +4641,8 @@ case 'add-debt': openDebtForm(null); break;
     case 'open-cash-breakdown': openCashBreakdownModal(); break;
     case 'manage-accounts': openManageAccountsModal(); break;
 
+    case 'cal-today': calCursor = null; calSel = null; renderPage(); break;
+    case 'stats-range': statsRange = (id === '7' || id === '90') ? id : '30'; renderPage(); break;
     case 'cal-prev':
       calCursor = { y: calCursor.m === 0 ? calCursor.y - 1 : calCursor.y, m: calCursor.m === 0 ? 11 : calCursor.m - 1 };
       renderPage(); break;
@@ -5150,42 +5203,46 @@ function mtShowSplash() {
   } catch (e) {}
   if (document.getElementById('mtSplash')) return;
 
-  var syms = ['Rp', '$', 'Rp', 'Rp', '$', 'Rp', 'Rp', '$'];
-  var bgHTML = '';
-  for (var i = 0; i < 8; i++) {
-    var left = (Math.random() * 100).toFixed(1);
-    var delay = (-Math.random() * 10).toFixed(1);
-    var dur = (11 + Math.random() * 5).toFixed(1);
-    var size = (50 + Math.random() * 60).toFixed(0);
-    bgHTML += '<span style="left:' + left + '%;font-size:' + size + 'px;' +
-              'animation-duration:' + dur + 's;animation-delay:' + delay + 's;">' + syms[i] + '</span>';
-  }
-
+  var h = new Date().getHours();
+  var hi = h < 4 ? 'malam' : h < 11 ? 'pagi' : h < 15 ? 'siang' : h < 19 ? 'sore' : 'malam';
+  var word = 'MoneyTrack'.split('').map(function (ch, i) { return '<span style="--i:' + i + '">' + ch + '</span>'; }).join('');
   var splash = document.createElement('div');
-  splash.id = 'mtSplash';
-  splash.setAttribute('aria-hidden', 'true');
+  splash.id = 'mtSplash'; splash.className = 'sp2'; splash.setAttribute('aria-hidden', 'true');
   splash.innerHTML =
-    '<div class="mt-splash-bg">' + bgHTML + '</div>' +
-    '<div class="mt-splash-inner">' +
-      '<div class="mt-orbit">' +
-        '<div class="mt-orbit-coin c1">💵</div>' +
-        '<div class="mt-orbit-coin c2">🪙</div>' +
-        '<div class="mt-orbit-coin c3">💰</div>' +
-        '<div class="mt-splash-logo">' + MT_LOGO_SVG + '</div>' +
-      '</div>' +
-      '<div class="mt-splash-name">MoneyTrack</div>' +
-      '<div class="mt-splash-sub">Keuangan Pelajar</div>' +
-      '<div class="mt-splash-bar"><i></i></div>' +
-      '<div class="mt-splash-status">Memuat...</div>' +
-    '</div>';
-
+    '<div class="sp-aurora"><i style="--x:-26vmin;--y:-22vmin"></i><i style="--x:28vmin;--y:8vmin"></i><i style="--x:-6vmin;--y:32vmin"></i></div>' +
+    '<div class="sp-center">' +
+      '<div class="sp-mark"><svg viewBox="0 0 64 64"><defs><linearGradient id="mtg3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#35D39A"/><stop offset="1" stop-color="#65D8F2"/></linearGradient></defs>' +
+        '<rect width="64" height="64" rx="18" fill="url(#mtg3)"/><path class="sp-m" pathLength="1" d="M16 44V22l16 14 16-14v22"/>' +
+        '<circle class="sp-ring" cx="48" cy="17" r="5"/><circle class="sp-coin" cx="48" cy="17" r="5" fill="#FFE9A3"/></svg></div>' +
+      '<div class="sp-word">' + word + '</div>' +
+      '<div class="sp-tag">Atur duit, tanpa drama.</div>' +
+    '</div>' +
+    '<div class="sp-hi">Selamat ' + hi + ' 👋 • ketuk untuk lanjut</div>';
   if (document.body.firstChild) document.body.insertBefore(splash, document.body.firstChild);
   else document.body.appendChild(splash);
 
-  setTimeout(function () {
+  /* Suara disinkronkan dengan animasi (hanya kalau browser sudah mengizinkan audio) */
+  var timers = [], done = false;
+  try {
+    if (navigator.userActivation && navigator.userActivation.hasBeenActive) {
+      _mtSplashSounded = true;
+      var cue = function (ms, fn) { timers.push(setTimeout(fn, ms)); };
+      cue(380, function () { mtTone({ type: 'sine', freqStart: 220, freqEnd: 880, dur: 0.55, gain: 0.3, force: true }); });
+      cue(1050, function () { mtTone({ type: 'triangle', freqStart: 1568, dur: 0.2, gain: 0.7, force: true }); });
+      cue(1130, function () { mtTone({ type: 'triangle', freqStart: 2093, dur: 0.25, gain: 0.5, force: true }); });
+      cue(1350, function () { mtArp([659.25, 783.99, 987.77, 1318.51], 75, 0.5, 0.75); });
+    }
+  } catch (e) {}
+
+  function finish() {
+    if (done) return; done = true;
+    timers.forEach(clearTimeout);
     splash.classList.add('mt-hide');
-    setTimeout(function () { if (splash.parentNode) splash.parentNode.removeChild(splash); }, 850);
-  }, 1700);
+    try { if (_mtSplashSounded) mtTone({ type: 'sine', freqStart: 900, freqEnd: 300, dur: 0.35, gain: 0.22, force: true }); } catch (e) {}
+    setTimeout(function () { if (splash.parentNode) splash.parentNode.removeChild(splash); }, 800);
+  }
+  splash.addEventListener('pointerdown', finish);
+  setTimeout(finish, 2600);
 }
 
 /* ============================================================
@@ -5294,12 +5351,13 @@ function mtBrain(b) {
   var today = todayISO(), T = parseISO(today);
   var dayAt = function (n) { return isoOf(new Date(T.getFullYear(), T.getMonth(), T.getDate() - n)); };
   var d7 = dayAt(6), d28 = dayAt(27), d30 = dayAt(29), mk = monthKey(today);
-  var byDay = {}, cat7 = {}, catPrev = {}, incomes = [], inc30 = 0, saved30 = 0, dep28 = 0, monthSpent = 0;
+  var byDay = {}, byBud = {}, cat7 = {}, catPrev = {}, incomes = [], inc30 = 0, saved30 = 0, dep28 = 0, monthSpent = 0;
 
   allTx().forEach(function (t) {
     var a = Number(t.amount) || 0;
     if (t.type === 'expense') {
       byDay[t.date] = (byDay[t.date] || 0) + a;
+      if (!isNeedTx(t)) byBud[t.date] = (byBud[t.date] || 0) + a;
       if (monthKey(t.date) === mk) monthSpent += a;
       if (t.category !== 'Bayar Utang') {
         var c = t.category || 'Lainnya';
@@ -5316,7 +5374,7 @@ function mtBrain(b) {
   });
 
   var series = [];
-  for (var i = 13; i >= 0; i--) { var iso = dayAt(i); series.push({ iso: iso, v: byDay[iso] || 0 }); }
+  for (var i = 13; i >= 0; i--) { var iso = dayAt(i); series.push({ iso: iso, v: byDay[iso] || 0, bud: byBud[iso] || 0 }); }
   var vals = series.map(function (x) { return x.v; });
   var sum14 = vals.reduce(function (s, v) { return s + v; }, 0), max14 = Math.max.apply(null, vals);
   var active = vals.filter(function (v) { return v > 0; }).length;
@@ -5356,7 +5414,7 @@ function mtBrain(b) {
   var proj = monthSpent + burn * Math.max(0, dim - T.getDate());
 
   var tgtE = Number(state.emergency.target) || 0, savedRate = inc30 > 0 ? saved30 / inc30 : 0;
-  var okDays = series.filter(function (x) { return x.v <= dailyBudgetFor(x.iso); }).length;
+  var okDays = series.filter(function (x) { return x.bud <= dailyBudgetFor(x.iso); }).length;
   var comp = {
     buffer: runway === null ? 80 : mtClamp(runway / 21 * 100),
     discipline: mtClamp(okDays / 14 * 100),
@@ -5411,7 +5469,7 @@ function mtBrain(b) {
   return { score: score, level: level, comp: comp, burn: burn, runway: runway, safeDaily: safeDaily, left: left, proj: proj,
            series: series, anomalies: anomalies, actions: acts.slice(0, 5), headline: headline, topWd: topWd, savedRate: savedRate };
 }
-function spentToday() { return sumExpenseOn(todayISO()); }
+function spentToday() { return sumBudgetOn(todayISO()); }
 
 function mtScoreColor(s) { return s >= 80 ? 'var(--emerald)' : s >= 60 ? 'var(--cyan)' : s >= 40 ? 'var(--gold)' : 'var(--coral)'; }
 function mtRing(score) {
@@ -5440,7 +5498,7 @@ function pageAI(b) {
   html += '<div class="card"><div class="card-title"><span class="ic">🧭</span> Prioritas untukmu</div>' +
     a.actions.map(function (x) { return '<div class="advice mt-act ' + x.tone + '"><div class="hd"><strong>' + x.icon + ' ' + x.title + '</strong></div><p>' + x.text + '</p></div>'; }).join('') + '</div>';
   html += '<div class="card"><div class="card-title"><span class="ic">📊</span> Pengeluaran 14 hari <span class="badge info">merah = lewat anggaran</span></div>' +
-    barChart(a.series.map(function (x) { return { label: x.iso.slice(8), value: x.v, color: x.v > dailyBudgetFor(x.iso) ? '#FF6B78' : '#35D39A' }; }), 150) + '</div>';
+    barChart(a.series.map(function (x) { return { label: x.iso.slice(8), value: x.v, color: x.bud > dailyBudgetFor(x.iso) ? '#FF6B78' : '#35D39A' }; }), 150) + '</div>';
   html += '<div class="card"><div class="card-title"><span class="ic">🧬</span> Komponen skor</div>' +
     Object.keys(a.comp).map(function (k) {
       var v = Math.round(a.comp[k]);
@@ -5471,6 +5529,9 @@ function mtCountUp(root) {
   }
   requestAnimationFrame(frame);
 }
+
+var _mtSplashSounded = false;
+MT_SOUND.boot = function () { mtArp([523.25, 659.25, 783.99, 1046.5, 1318.51], 70, 0.45, 0.8); };
 
 function openDrawer() {
   document.body.classList.add('drawer-open');
